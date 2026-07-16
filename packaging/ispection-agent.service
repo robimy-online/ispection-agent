@@ -1,0 +1,23 @@
+[Unit]
+Description=ispection agent (ISP link-quality monitoring)
+Documentation=https://github.com/robimy-online/ispection-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ispection
+WorkingDirectory=/opt/ispection-agent
+EnvironmentFile=/etc/ispection-agent.env
+ExecStart=/usr/bin/env node dist/index.js
+Restart=always
+RestartSec=10
+# Hardening — the agent needs no privileges (ping works without root).
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/ispection-agent
+
+[Install]
+WantedBy=multi-user.target

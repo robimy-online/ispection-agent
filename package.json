@@ -1,0 +1,41 @@
+{
+  "name": "ispection-agent",
+  "version": "0.1.0",
+  "description": "Lightweight ISP-reliability monitoring agent — measures link quality and ships signed measurements to an ispection collector.",
+  "license": "MIT",
+  "author": "robimy//online (https://robimy.online)",
+  "homepage": "https://github.com/robimy-online/ispection-agent#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/robimy-online/ispection-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/robimy-online/ispection-agent/issues"
+  },
+  "keywords": [
+    "isp",
+    "uptime",
+    "monitoring",
+    "network",
+    "latency",
+    "packet-loss",
+    "agent",
+    "ispection"
+  ],
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

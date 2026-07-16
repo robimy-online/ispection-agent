@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+# local agent state (private key, buffer, meta) — NEVER commit
+.ispection-agent/
+data/
+.DS_Store

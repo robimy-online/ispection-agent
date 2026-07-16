@@ -1,0 +1,10 @@
+node_modules
+dist
+.git
+.github
+*.log
+data
+.ispection-agent
+docker-compose.yml
+README.md
+.DS_Store

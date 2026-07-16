@@ -1,0 +1,25 @@
+# ispection agent — ready-to-run stack.
+# 1) set CLAIM_CODE (from the panel's "Add agent" dialog); INGEST_URL defaults to the ispection service,
+# 2) docker compose up -d --build
+#
+# Updates: manual `docker compose pull && docker compose up -d`, or opt-in Watchtower for auto-update.
+# The agent also polls /agents/release and logs when a newer version is available.
+
+services:
+  agent:
+    # Builds from source (this repo). To pull the published image instead, remove `build:` and keep `image:`.
+    build: .
+    image: ${AGENT_IMAGE:-ghcr.io/robimy-online/ispection-agent:latest}
+    restart: unless-stopped
+    environment:
+      INGEST_URL: ${INGEST_URL:-https://ispection.robimy.online/api}
+      CLAIM_CODE: ${CLAIM_CODE:?set CLAIM_CODE from the panel}
+      TARGETS: ${TARGETS:-1.1.1.1,8.8.8.8}
+      AGENT_DATA_DIR: /data
+      INGEST_INSECURE: ${INGEST_INSECURE:-false}
+      INGEST_PIN_SPKI: ${INGEST_PIN_SPKI:-} # base64 SHA-256 of the server SPKI (prod https)
+    volumes:
+      - ispection_agent:/data # Ed25519 key, buffer, meta — must survive restarts
+
+volumes:
+  ispection_agent:
