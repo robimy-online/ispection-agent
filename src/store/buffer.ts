@@ -15,15 +15,22 @@ interface Meta {
 export class AgentStore {
   private readonly metaPath: string;
   private readonly bufferPath: string;
+  private readonly maxSamples: number;
   private meta: Meta;
   private samples: MeasurementSample[];
 
-  constructor(dir: string) {
+  constructor(dir: string, maxSamples = 50_000) {
     mkdirSync(dir, { recursive: true });
+    this.maxSamples = Math.max(100, maxSamples);
     this.metaPath = path.join(dir, 'meta.json');
     this.bufferPath = path.join(dir, 'buffer.json');
     this.meta = this.readJson<Meta>(this.metaPath, { agentId: null, seq: 0 });
     this.samples = this.readJson<MeasurementSample[]>(this.bufferPath, []);
+    // Trim a buffer that grew past the cap under an older build.
+    if (this.samples.length > this.maxSamples) {
+      this.samples = this.samples.slice(-this.maxSamples);
+      this.writeBuffer();
+    }
   }
 
   get agentId(): number | null {
@@ -42,9 +49,16 @@ export class AgentStore {
     return this.meta.seq;
   }
 
-  append(samples: MeasurementSample[]): void {
+  /** Appends samples, enforcing the cap by dropping the oldest. Returns how many were dropped. */
+  append(samples: MeasurementSample[]): number {
     this.samples.push(...samples);
+    let dropped = 0;
+    if (this.samples.length > this.maxSamples) {
+      dropped = this.samples.length - this.maxSamples;
+      this.samples.splice(0, dropped); // ring behaviour: newest data wins during a long outage
+    }
     this.writeBuffer();
+    return dropped;
   }
 
   pending(): number {

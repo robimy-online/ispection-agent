@@ -13,6 +13,20 @@ export interface PostOptions {
   pinSpki?: string | null; // base64 sha256 of the server SPKI; enforced only over https
 }
 
+/**
+ * checkServerIdentity that pins the leaf public key (SPKI SHA-256). Survives cert renewal
+ * (unlike full-cert pinning). Runs after the default chain validation, so it only tightens trust.
+ * Shared by the HTTP client and the WebSocket handshake so both channels pin consistently.
+ */
+export function spkiPinChecker(pinSpki: string): (host: string, cert: PeerCertificate) => Error | undefined {
+  return (_host: string, cert: PeerCertificate): Error | undefined => {
+    const der = cert.pubkey;
+    if (!der) return new Error('No peer public key to pin');
+    const pin = createHash('sha256').update(der).digest('base64');
+    return pin === pinSpki ? undefined : new Error(`SPKI pin mismatch (got ${pin})`);
+  };
+}
+
 /** POST a raw body over http/https, optionally pinning the server public key (SPKI SHA-256). */
 export function postJson(
   urlStr: string,
@@ -37,13 +51,7 @@ export function postJson(
   };
 
   if (isHttps && opts.pinSpki) {
-    // Pin the leaf's public key (survives cert renewal, unlike full-cert pinning).
-    options.checkServerIdentity = (_host: string, cert: PeerCertificate): Error | undefined => {
-      const der = cert.pubkey;
-      if (!der) return new Error('No peer public key to pin');
-      const pin = createHash('sha256').update(der).digest('base64');
-      return pin === opts.pinSpki ? undefined : new Error(`SPKI pin mismatch (got ${pin})`);
-    };
+    options.checkServerIdentity = spkiPinChecker(opts.pinSpki);
   }
 
   return new Promise((resolve, reject) => {
@@ -70,12 +78,7 @@ export function getJson(urlStr: string, opts: PostOptions = {}): Promise<HttpRes
     path: url.pathname + url.search,
   };
   if (isHttps && opts.pinSpki) {
-    options.checkServerIdentity = (_host: string, cert: PeerCertificate): Error | undefined => {
-      const der = cert.pubkey;
-      if (!der) return new Error('No peer public key to pin');
-      const pin = createHash('sha256').update(der).digest('base64');
-      return pin === opts.pinSpki ? undefined : new Error(`SPKI pin mismatch (got ${pin})`);
-    };
+    options.checkServerIdentity = spkiPinChecker(opts.pinSpki);
   }
   return new Promise((resolve, reject) => {
     const req = lib.request(options, (res) => {

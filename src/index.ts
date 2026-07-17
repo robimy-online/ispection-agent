@@ -15,6 +15,7 @@ import { measureIpv6 } from './measure/ipv6';
 import { measurePorts } from './measure/ports';
 import { measureDns } from './measure/dns-check';
 import { ping } from './measure/ping';
+import { clamp, isValidHost } from './validate';
 import { err, log } from './logger';
 
 interface LiveState {
@@ -144,27 +145,32 @@ async function enrollIfNeeded(cfg: AgentConfig, keys: AgentKeys, store: AgentSto
 }
 
 async function flush(cfg: AgentConfig, keys: AgentKeys, store: AgentStore): Promise<void> {
-  if (store.pending() === 0) return;
-  const batch = store.peekBatch(cfg.maxBatch);
-  const rawBody = Buffer.from(JSON.stringify({ samples: batch }));
-  const ts = String(Date.now());
-  const seq = String(store.nextSeq());
-  const signature = keys.sign(Buffer.concat([Buffer.from(`${ts}.${seq}.`), rawBody]));
-  const headers = {
-    'x-agent-id': String(store.agentId),
-    'x-timestamp': ts,
-    'x-sequence': seq,
-    'x-signature': signature,
-    'x-agent-version': cfg.version,
-    'x-api-version': String(INGEST_API_VERSION),
-  };
-  const res = await postJson(`${cfg.ingestUrl}/ingest`, headers, rawBody, pinOpts(cfg));
-  if (res.status >= 200 && res.status < 300) {
-    store.dropBatch(batch.length);
-    log(`Sent ${batch.length} samples (seq=${seq}); buffered: ${store.pending()}`);
-  } else {
-    lastError = `ingest ${res.status}`;
-    err(`Ingest failed: ${res.status} ${res.body} — keeping ${batch.length} buffered`);
+  // Drain the whole backlog, one batch per request, until empty or a send fails. Draining only
+  // one batch per cycle (as before) let a post-outage backlog take many minutes to clear.
+  while (store.pending() > 0) {
+    const batch = store.peekBatch(cfg.maxBatch);
+    const rawBody = Buffer.from(JSON.stringify({ samples: batch }));
+    const ts = String(Date.now());
+    const seq = String(store.nextSeq());
+    const signature = keys.sign(Buffer.concat([Buffer.from(`${ts}.${seq}.`), rawBody]));
+    const headers = {
+      'x-agent-id': String(store.agentId),
+      'x-timestamp': ts,
+      'x-sequence': seq,
+      'x-signature': signature,
+      'x-agent-version': cfg.version,
+      'x-api-version': String(INGEST_API_VERSION),
+    };
+    const res = await postJson(`${cfg.ingestUrl}/ingest`, headers, rawBody, pinOpts(cfg));
+    if (res.status >= 200 && res.status < 300) {
+      store.dropBatch(batch.length);
+      lastError = null;
+      log(`Sent ${batch.length} samples (seq=${seq}); buffered: ${store.pending()}`);
+    } else {
+      lastError = `ingest ${res.status}`;
+      err(`Ingest failed: ${res.status} ${res.body} — keeping ${batch.length} buffered`);
+      return; // stop draining; retry on the next cycle
+    }
   }
 }
 
@@ -261,17 +267,42 @@ async function sendThroughput(cfg: AgentConfig, keys: AgentKeys, store: AgentSto
   }
 }
 
-/** Overlay server-side config onto the current cfg. Unknown/absent keys keep env defaults. */
+/**
+ * Overlay server-side config onto the current cfg. Unknown/absent keys keep env defaults.
+ * The collector is a trust boundary: every value is range-clamped and every target is validated
+ * before it takes effect, so a compromised or misbehaving server can't drive the agent into
+ * abusive intervals or hand flag-like strings to the probe binaries.
+ */
 function applyRemoteConfig(cfg: AgentConfig, rc: RemoteConfig): boolean {
   let changed = false;
-  if (typeof rc.intervalSec === 'number' && rc.intervalSec > 0) (cfg.intervalSec = rc.intervalSec), (changed = true);
-  if (typeof rc.pingCount === 'number' && rc.pingCount > 0) (cfg.pingCount = rc.pingCount), (changed = true);
-  if (Array.isArray(rc.targets) && rc.targets.length) (cfg.targets = rc.targets), (changed = true);
-  if (typeof rc.rotateTargets === 'boolean') (cfg.rotateTargets = rc.rotateTargets), (changed = true);
-  if (typeof rc.scheduleJitterPct === 'number') (cfg.scheduleJitterPct = rc.scheduleJitterPct), (changed = true);
+  if (typeof rc.intervalSec === 'number' && rc.intervalSec > 0) {
+    const v = Math.round(clamp(rc.intervalSec, 5, 86_400));
+    if (v !== cfg.intervalSec) (cfg.intervalSec = v), (changed = true);
+  }
+  if (typeof rc.pingCount === 'number' && rc.pingCount > 0) {
+    const v = Math.round(clamp(rc.pingCount, 1, 20));
+    if (v !== cfg.pingCount) (cfg.pingCount = v), (changed = true);
+  }
+  if (Array.isArray(rc.targets)) {
+    const valid = rc.targets.filter((t): t is string => typeof t === 'string' && isValidHost(t));
+    if (valid.length && valid.join(',') !== cfg.targets.join(',')) (cfg.targets = valid), (changed = true);
+  }
+  if (typeof rc.rotateTargets === 'boolean' && rc.rotateTargets !== cfg.rotateTargets) {
+    (cfg.rotateTargets = rc.rotateTargets), (changed = true);
+  }
+  if (typeof rc.scheduleJitterPct === 'number') {
+    const v = clamp(rc.scheduleJitterPct, 0, 0.5);
+    if (v !== cfg.scheduleJitterPct) (cfg.scheduleJitterPct = v), (changed = true);
+  }
   // Declared link speeds from the panel take precedence over env DECLARED_* (used for "% of contract").
-  if (typeof rc.declaredDownMbps === 'number' && rc.declaredDownMbps > 0) (cfg.declaredDownMbps = rc.declaredDownMbps), (changed = true);
-  if (typeof rc.declaredUpMbps === 'number' && rc.declaredUpMbps > 0) (cfg.declaredUpMbps = rc.declaredUpMbps), (changed = true);
+  if (typeof rc.declaredDownMbps === 'number' && rc.declaredDownMbps > 0) {
+    const v = clamp(rc.declaredDownMbps, 0.01, 1_000_000);
+    if (v !== cfg.declaredDownMbps) (cfg.declaredDownMbps = v), (changed = true);
+  }
+  if (typeof rc.declaredUpMbps === 'number' && rc.declaredUpMbps > 0) {
+    const v = clamp(rc.declaredUpMbps, 0.01, 1_000_000);
+    if (v !== cfg.declaredUpMbps) (cfg.declaredUpMbps = v), (changed = true);
+  }
   return changed;
 }
 
@@ -330,7 +361,8 @@ async function cycle(
   const samples = await probeAll(targets, cfg.pingCount);
   const httpSample = await probeHttp(cfg.httpTarget);
   const all = [...samples, httpSample];
-  store.append(all);
+  const dropped = store.append(all);
+  if (dropped > 0) err(`Buffer full (${cfg.maxBuffer} samples) — dropped ${dropped} oldest`);
   const summary = samples
     .map((s) => `${s.target}=${s.reachable ? `${s.rttMs?.toFixed(1)}ms/${s.lossPct}%loss` : 'DOWN'}`)
     .join(', ');
@@ -353,7 +385,7 @@ async function cycle(
 async function main(): Promise<void> {
   const cfg = loadConfig();
   const keys = AgentKeys.loadOrCreate(cfg.dataDir);
-  const store = new AgentStore(cfg.dataDir);
+  const store = new AgentStore(cfg.dataDir, cfg.maxBuffer);
   const targetsDesc = cfg.rotateTargets
     ? `rotating ${cfg.targetsPerCycle}/${cfg.targetPool.length} from pool`
     : `[${cfg.targets.join(', ')}]`;

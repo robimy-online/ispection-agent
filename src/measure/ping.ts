@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { isValidHost } from '../validate';
 
 const exec = promisify(execFile);
 
@@ -17,19 +18,29 @@ export interface PingResult {
  * Returns null when the `ping` binary is absent → caller falls back to TCP connect.
  */
 export async function ping(target: string, count: number): Promise<PingResult | null> {
+  // Reject malformed / flag-like targets before they reach the ping binary (argument injection).
+  if (!isValidHost(target)) return { reachable: false, rttMs: null, lossPct: 100, jitterMs: null, samples: count };
   const isWin = process.platform === 'win32';
-  const args = isWin ? ['-n', String(count), target] : ['-c', String(count), '-w', '5', target];
+  // '--' ends option parsing so a target can never be read as a flag (POSIX ping; not supported by Windows ping).
+  const safe = Math.max(1, Math.trunc(count) || 1);
+  const args = isWin ? ['-n', String(safe), target] : ['-c', String(safe), '-w', '5', '--', target];
   try {
     const { stdout } = await exec('ping', args, { timeout: 15_000 });
-    return parse(stdout, count);
+    return parse(stdout, safe);
   } catch (e: unknown) {
-    const errObj = e as { code?: string; stdout?: string };
-    if (errObj.code === 'ENOENT') return null; // no ping binary → fall back
+    const errObj = e as { code?: string; stdout?: string; stderr?: string };
+    if (errObj.code === 'ENOENT') return null; // no ping binary → fall back to TCP connect
+    // No privilege for ICMP (non-root, no cap_net_raw / ping_group_range) → fall back to TCP connect
+    // instead of falsely reporting the target DOWN.
+    const detail = `${errObj.stderr ?? ''} ${(e as Error)?.message ?? ''}`.toLowerCase();
+    if (errObj.code === 'EACCES' || errObj.code === 'EPERM' || detail.includes('not permitted') || detail.includes('permission denied')) {
+      return null;
+    }
     if (errObj.stdout) {
-      const parsed = parse(errObj.stdout, count);
+      const parsed = parse(errObj.stdout, safe);
       if (parsed) return parsed;
     }
-    return { reachable: false, rttMs: null, lossPct: 100, jitterMs: null, samples: count };
+    return { reachable: false, rttMs: null, lossPct: 100, jitterMs: null, samples: safe };
   }
 }
 

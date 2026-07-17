@@ -45,9 +45,14 @@ Prefer to self-host the backend? Point `INGEST_URL` at your own collector.
 ```bash
 docker run -d --name ispection-agent --restart unless-stopped \
   -e CLAIM_CODE=<code-from-panel> \
+  --sysctl "net.ipv4.ping_group_range=0 2147483647" \
   -v ispection-agent:/data \
   ghcr.io/robimy-online/ispection-agent:latest
 ```
+
+The image runs **unprivileged** (user `node`, uid 1000). The `--sysctl` line lets that user send
+ICMP without `NET_RAW`; omit it and the agent still works but falls back to TCP-connect timing for
+reachability. Compose sets this (and a read-only root FS, dropped capabilities) for you.
 
 Or with Compose (recommended) — grab [`docker-compose.yml`](docker-compose.yml) + [`.env.example`](.env.example), then just set the env and run:
 
@@ -59,6 +64,11 @@ docker compose up -d
 `INGEST_URL` defaults to the hosted ispection service, so you normally only need a `CLAIM_CODE`
 (from the panel's "Add agent" dialog). Point `INGEST_URL` at your own collector if you self-host the backend.
 The `/data` volume (Ed25519 key + buffer + meta) **must survive restarts**.
+
+> **Upgrading from ≤ 0.1.1?** The container now runs as uid 1000 instead of root. A data volume
+> created by an older (root) image is owned by root, so fix it once after pulling:
+> `docker run --rm -v ispection_agent:/data alpine chown -R 1000:1000 /data`
+> (use your volume name; the Compose default is `ispection_agent`). Fresh installs need nothing.
 
 ## Configuration (environment variables)
 
@@ -76,6 +86,7 @@ The `/data` volume (Ed25519 key + buffer + meta) **must survive restarts**.
 | `UPDATE_MODE` | `notify` | `off` \| `notify` (log when outdated) \| `auto` (defer image swap to Watchtower) |
 | `UPDATE_CHECK_INTERVAL_SEC` | `86400` | How often to poll `GET /agents/release` (ignored when `off`) |
 | `INGEST_MAX_BATCH` | `500` | Max samples per flush |
+| `BUFFER_MAX` | `50000` | Hard cap on buffered samples; the oldest are dropped past this (bounds RAM/disk during a long outage) |
 | `HTTP_TARGET` | `https://www.google.com/generate_204` | Target for the DNS + TTFB/TLS probe |
 | `TRACEROUTE_TARGET` | first of `TARGETS` | Traceroute target |
 | `TRACEROUTE_INTERVAL_SEC` | `300` | Traceroute interval |

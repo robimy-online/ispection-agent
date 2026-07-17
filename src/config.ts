@@ -1,6 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
+import { isValidHost } from './validate';
 
 // Remote config fetched from the server (overrides env). Local type — the agent stays standalone.
 export interface RemoteConfig {
@@ -25,6 +26,7 @@ export interface AgentConfig {
   insecure: boolean; // http, skip cert pinning (dev only)
   pinSpki: string | null; // base64 sha256 of the server SPKI (prod https)
   maxBatch: number;
+  maxBuffer: number; // hard cap on buffered samples; oldest dropped past this (bounds RAM + disk)
   version: string; // agent version (reported to the server)
   httpTarget: string; // URL for the DNS + TTFB probe
   releasePublicKey: string; // base64 SPKI Ed25519 — verifies the signed self-update manifest
@@ -75,24 +77,28 @@ function parseUpdateMode(raw: string | undefined): UpdateMode {
 
 export function loadConfig(): AgentConfig {
   const env = process.env;
+  // Drop malformed/flag-like targets up front — they flow to ping/traceroute (see validate.ts).
   const targets = (env.TARGETS ?? '1.1.1.1,8.8.8.8')
     .split(',')
     .map((s) => s.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter(isValidHost);
+  const safeTargets = targets.length ? targets : ['1.1.1.1', '8.8.8.8'];
   return {
     ingestUrl: (env.INGEST_URL ?? 'https://ispection.robimy.online/api').replace(/\/+$/, ''),
     claimCode: env.CLAIM_CODE ?? null,
-    targets,
+    targets: safeTargets,
     intervalSec: Number(env.INGEST_INTERVAL_SEC ?? 30),
-    pingCount: Number(env.PING_COUNT ?? 5),
+    pingCount: Math.max(1, Math.trunc(Number(env.PING_COUNT ?? 5)) || 5),
     dataDir: env.AGENT_DATA_DIR ?? path.join(os.homedir(), '.ispection-agent'),
     insecure: env.INGEST_INSECURE === 'true',
     pinSpki: env.INGEST_PIN_SPKI ?? null,
     maxBatch: Number(env.INGEST_MAX_BATCH ?? 500),
+    maxBuffer: Math.max(100, Math.trunc(Number(env.BUFFER_MAX ?? 50_000)) || 50_000),
     version: readAgentVersion(),
     httpTarget: env.HTTP_TARGET ?? 'https://www.google.com/generate_204',
     releasePublicKey: env.RELEASE_PUBLIC_KEY ?? '',
-    tracerouteTarget: env.TRACEROUTE_TARGET ?? targets[0] ?? '1.1.1.1',
+    tracerouteTarget: env.TRACEROUTE_TARGET ?? safeTargets[0] ?? '1.1.1.1',
     tracerouteIntervalSec: Number(env.TRACEROUTE_INTERVAL_SEC ?? 300),
     throughputUrl: env.THROUGHPUT_URL ?? 'https://speed.cloudflare.com/__down?bytes=25000000',
     throughputIntervalSec: Number(env.THROUGHPUT_INTERVAL_SEC ?? 900),
@@ -106,9 +112,10 @@ export function loadConfig(): AgentConfig {
     targetPool: (env.TARGET_POOL ?? DEFAULT_TARGET_POOL)
       .split(',')
       .map((s) => s.trim())
-      .filter(Boolean),
+      .filter(Boolean)
+      .filter(isValidHost),
     rotateTargets: env.ROTATE_TARGETS === 'true',
-    targetsPerCycle: Math.max(1, Number(env.TARGETS_PER_CYCLE ?? targets.length)),
+    targetsPerCycle: Math.max(1, Number(env.TARGETS_PER_CYCLE ?? safeTargets.length)),
     scheduleJitterPct: Math.min(0.5, Math.max(0, Number(env.SCHEDULE_JITTER_PCT ?? 0))),
     portProbes: parsePortProbes(env.PORT_PROBES ?? DEFAULT_PORT_PROBES),
     portProbeIntervalSec: Number(env.PORT_PROBE_INTERVAL_SEC ?? 600),
@@ -135,5 +142,5 @@ function parsePortProbes(raw: string): Array<{ host: string; port: number }> {
       const port = Number(pair.slice(idx + 1));
       return { host, port };
     })
-    .filter((p) => p.host !== '' && Number.isInteger(p.port) && p.port > 0 && p.port <= 65535);
+    .filter((p) => isValidHost(p.host) && Number.isInteger(p.port) && p.port > 0 && p.port <= 65535);
 }

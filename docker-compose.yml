@@ -10,6 +10,18 @@ services:
   agent:
     image: ${AGENT_IMAGE:-ghcr.io/robimy-online/ispection-agent:latest}
     restart: unless-stopped
+    # Hardening: runs as non-root (uid 1000) with a read-only root FS and no Linux capabilities.
+    # Only /data (the named volume) is writable. ping works via unprivileged ICMP datagram sockets,
+    # enabled by the ping_group_range sysctl below — so no NET_RAW capability is needed.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    sysctls:
+      - net.ipv4.ping_group_range=0 2147483647
+    tmpfs:
+      - /tmp
     environment:
       INGEST_URL: ${INGEST_URL:-https://ispection.robimy.online/api}
       CLAIM_CODE: ${CLAIM_CODE:?set CLAIM_CODE from the panel}
@@ -25,13 +37,21 @@ services:
 
   # Opt-in auto-update: `docker compose --profile autoupdate up -d`.
   # --label-enable → watches ONLY the labeled agent (not your other containers); hourly, prunes old images.
+  #
+  # SECURITY: mounting the Docker socket gives Watchtower (and anything that compromises it or a
+  # malicious image it pulls) root-equivalent control of the HOST. This is why auto-update is
+  # opt-in and off by default. If you don't need hands-off updates, prefer the manual path
+  # (`docker compose pull && docker compose up -d`, e.g. from cron) and skip this service entirely.
+  # The socket is mounted read-only as a small extra guard; it is NOT a full mitigation.
   watchtower:
     image: containrrr/watchtower
     restart: unless-stopped
     profiles: [autoupdate]
     command: --label-enable --cleanup --interval 3600
+    security_opt:
+      - no-new-privileges:true
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
 volumes:
   ispection_agent:

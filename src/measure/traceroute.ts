@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { isValidHost } from '../validate';
 
 const exec = promisify(execFile);
 
@@ -11,11 +12,13 @@ export interface Hop {
 
 /** Traceroute to the target (numeric, 1 query/hop). Returns [] when the tool is unavailable. */
 export async function traceroute(target: string): Promise<Hop[]> {
+  if (!isValidHost(target)) return []; // never hand a flag-like value to the traceroute binary
   const isWin = process.platform === 'win32';
   const cmd = isWin ? 'tracert' : 'traceroute';
+  // '--' ends option parsing (POSIX traceroute; Windows tracert doesn't support it).
   const args = isWin
     ? ['-d', '-w', '2000', '-h', '30', target]
-    : ['-n', '-q', '1', '-w', '2', '-m', '30', target];
+    : ['-n', '-q', '1', '-w', '2', '-m', '30', '--', target];
   try {
     const { stdout } = await exec(cmd, args, { timeout: 90_000 });
     return parse(stdout);
