@@ -4,4 +4,6 @@ dist/
 # local agent state (private key, buffer, meta) — NEVER commit
 .ispection-agent/
 data/
+# local secrets (your filled-in copy of .env.example) — .env.example itself stays tracked
+.env
 .DS_Store

@@ -1,14 +1,13 @@
-# ispection agent — ready-to-run stack.
-# 1) set CLAIM_CODE (from the panel's "Add agent" dialog); INGEST_URL defaults to the ispection service,
-# 2) docker compose up -d --build
+# ispection agent — ready-to-run stack. Onboarding is just two steps:
+#   1) cp .env.example .env     → set CLAIM_CODE (panel → "Add agent")
+#   2) docker compose up -d
 #
 # Updates (UPDATE_MODE, default notify): manual `docker compose pull && docker compose up -d`,
-# or opt-in auto with `docker compose --profile autoupdate up -d` (runs Watchtower for just this agent).
+# or auto `docker compose --profile autoupdate up -d` (Watchtower watches only this agent).
+# Build from source instead of pulling? `docker build -t ispection-agent . && AGENT_IMAGE=ispection-agent docker compose up -d`.
 
 services:
   agent:
-    # Builds from source (this repo). To pull the published image instead, remove `build:` and keep `image:`.
-    build: .
     image: ${AGENT_IMAGE:-ghcr.io/robimy-online/ispection-agent:latest}
     restart: unless-stopped
     environment:

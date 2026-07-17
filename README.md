@@ -32,9 +32,10 @@ docker run -d --name ispection-agent --restart unless-stopped \
   ghcr.io/robimy-online/ispection-agent:latest
 ```
 
-Or with Compose — copy [`docker-compose.yml`](docker-compose.yml), set `CLAIM_CODE`, then:
+Or with Compose (recommended) — grab [`docker-compose.yml`](docker-compose.yml) + [`.env.example`](.env.example), then just set the env and run:
 
 ```bash
+cp .env.example .env      # then set CLAIM_CODE (panel → "Add agent")
 docker compose up -d
 ```
 
