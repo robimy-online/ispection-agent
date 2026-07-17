@@ -3,7 +3,7 @@
 All notable changes are documented here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions follow [SemVer](https://semver.org).
 
-## [Unreleased]
+## [0.2.0] — 2026-07-17
 
 ### Security & hardening
 - **Remote config is now treated as a trust boundary.** Values pushed by the collector are
@@ -21,6 +21,8 @@ All notable changes are documented here. The format loosely follows
   unprivileged ICMP datagram sockets, no `NET_RAW`). The Watchtower socket is mounted read-only with
   a stronger warning. **Breaking:** an existing root-owned `/data` volume must be chowned once —
   see the upgrade note in the README.
+- Startup warns loudly when `INGEST_INSECURE=true` (pinning off + plain HTTP), and when a hosted
+  `https` collector is used without `INGEST_PIN_SPKI` set.
 
 ### Reliability
 - **Bounded buffer.** New `BUFFER_MAX` (default 50000) caps buffered samples; the oldest are dropped
@@ -29,6 +31,8 @@ All notable changes are documented here. The format loosely follows
   instead of one batch per cycle, so a post-outage backlog clears quickly.
 - `ping` falls back to TCP-connect timing (instead of reporting the target down) when it lacks ICMP
   privilege, and the bare `docker run` path now persists to `/data` by default (`AGENT_DATA_DIR`).
+- Enrollment fails with a clear error instead of an unhandled `SyntaxError` when the collector
+  returns a non-JSON 2xx body.
 
 ## [0.1.1] — 2026-07-17
 

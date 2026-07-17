@@ -1,6 +1,6 @@
 {
   "name": "ispection-agent",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Lightweight ISP-reliability monitoring agent — measures link quality and ships signed measurements to an ispection collector.",
   "license": "MIT",
   "author": "robimy//online (https://robimy.online)",

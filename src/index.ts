@@ -16,7 +16,7 @@ import { measurePorts } from './measure/ports';
 import { measureDns } from './measure/dns-check';
 import { ping } from './measure/ping';
 import { clamp, isValidHost } from './validate';
-import { err, log } from './logger';
+import { err, log, warn } from './logger';
 
 interface LiveState {
   last: LiveStatus;
@@ -137,7 +137,12 @@ async function enrollIfNeeded(cfg: AgentConfig, keys: AgentKeys, store: AgentSto
   );
   const res = await postJson(`${cfg.ingestUrl}/agents/enroll`, { 'x-api-version': String(INGEST_API_VERSION) }, body, pinOpts(cfg));
   if (res.status >= 300) throw new Error(`Enrollment failed: ${res.status} ${res.body}`);
-  const parsed = JSON.parse(res.body) as { data?: { agentId?: number }; agentId?: number };
+  let parsed: { data?: { agentId?: number }; agentId?: number };
+  try {
+    parsed = JSON.parse(res.body) as { data?: { agentId?: number }; agentId?: number };
+  } catch {
+    throw new Error(`Enrollment response was not valid JSON: ${res.body.slice(0, 200)}`);
+  }
   const agentId = parsed.data?.agentId ?? parsed.agentId;
   if (!agentId) throw new Error(`Enrollment response has no agentId: ${res.body}`);
   store.setAgentId(agentId);
@@ -391,6 +396,11 @@ async function main(): Promise<void> {
     : `[${cfg.targets.join(', ')}]`;
   const jitterDesc = cfg.scheduleJitterPct > 0 ? `; jitter ±${Math.round(cfg.scheduleJitterPct * 100)}%` : '';
   log(`ispection agent v${cfg.version} → ${cfg.ingestUrl}; targets=${targetsDesc}; interval=${cfg.intervalSec}s${jitterDesc}; updates=${cfg.updateMode}`);
+  if (cfg.insecure) {
+    warn('INGEST_INSECURE=true — TLS certificate pinning is DISABLED and plain HTTP is allowed. This is for local development only; never run it in production.');
+  } else if (cfg.ingestUrl.startsWith('https://') && !cfg.pinSpki) {
+    warn('INGEST_PIN_SPKI is not set — the collector connection relies on CA validation only (no key pinning). Set INGEST_PIN_SPKI for defence-in-depth against a CA-level MITM.');
+  }
   await enrollIfNeeded(cfg, keys, store);
 
   // Remote config: fetch before building the loop (at startup), then refresh (some fields take effect next cycle).
