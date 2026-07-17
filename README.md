@@ -55,6 +55,8 @@ The `/data` volume (Ed25519 key + buffer + meta) **must survive restarts**.
 | `INGEST_INSECURE` | `false` | `true` = HTTP, skip cert pinning (dev only) |
 | `INGEST_PIN_SPKI` | — | base64 SHA-256 of the server SPKI (prod HTTPS pinning) |
 | `RELEASE_PUBLIC_KEY` | — | base64 SPKI Ed25519 — verifies the signed self-update manifest |
+| `UPDATE_MODE` | `notify` | `off` \| `notify` (log when outdated) \| `auto` (defer image swap to Watchtower) |
+| `UPDATE_CHECK_INTERVAL_SEC` | `86400` | How often to poll `GET /agents/release` (ignored when `off`) |
 | `INGEST_MAX_BATCH` | `500` | Max samples per flush |
 | `HTTP_TARGET` | `https://www.google.com/generate_204` | Target for the DNS + TTFB/TLS probe |
 | `TRACEROUTE_TARGET` | first of `TARGETS` | Traceroute target |
@@ -94,9 +96,21 @@ Makes it harder for an ISP to recognize measurement traffic (and thus favor it).
 
 ## Updates
 
-- **Manual (default):** `docker compose pull && docker compose up -d` (or pull + recreate the container).
-- **Automatic (opt-in):** run [Watchtower](https://containrrr.dev/watchtower/) alongside the agent to pull new images and restart automatically.
-- **Notify:** the agent reports its version (enroll + `X-Agent-Version` header) so the panel shows when an update is available; it also polls `GET /agents/release` on startup and daily and **logs** when a newer version exists.
+Choose per install with `UPDATE_MODE` (default `notify`):
+
+- **`notify` (default) — manual, with a heads-up.** The agent reports its version (enroll + `X-Agent-Version`
+  header, so the panel flags outdated agents) and polls `GET /agents/release` on startup and every
+  `UPDATE_CHECK_INTERVAL_SEC` (default daily), **logging the exact upgrade command** when a newer version exists.
+  You update when you want: `docker compose pull && docker compose up -d`.
+- **`auto` — hands-off.** Run [Watchtower](https://containrrr.dev/watchtower/) alongside the agent; it pulls new
+  images and recreates the container for you. It's bundled behind a compose profile:
+  ```bash
+  docker compose --profile autoupdate up -d
+  ```
+  Watchtower runs with `--label-enable`, so it only touches the agent (labeled
+  `com.centurylinklabs.watchtower.enable=true`) — never your other containers. A container can't swap itself from
+  the inside, so `UPDATE_MODE=auto` on the agent just logs that Watchtower owns the swap.
+- **`off` — pinned.** No checks, no logs. Pin the image to `:X.Y.Z` or a `@sha256:` digest and update deliberately.
 
 Images are published to `ghcr.io/robimy-online/ispection-agent` on a `vX.Y.Z` git tag, tagged `X.Y.Z`, `X.Y`, `X`, and `latest`.
 Pin to `:X.Y.Z` or a `@sha256:` digest for reproducibility; container images are cosign-signed (keyless, GitHub OIDC).

@@ -11,6 +11,8 @@ export interface RemoteConfig {
   scheduleJitterPct?: number;
 }
 
+export type UpdateMode = 'off' | 'notify' | 'auto';
+
 export interface AgentConfig {
   ingestUrl: string; // base URL, e.g. https://ispection.robimy.online/api
   claimCode: string | null; // one-time enrollment code (only needed on first run)
@@ -46,6 +48,10 @@ export interface AgentConfig {
   rotateTargets: boolean;
   targetsPerCycle: number;
   scheduleJitterPct: number; // 0–0.5; 0 = deterministic
+  // Update behaviour: 'off' = never check; 'notify' (default) = log when a newer version is out;
+  // 'auto' = check +, when containerized, defer the actual image swap to Watchtower (see README).
+  updateMode: UpdateMode;
+  updateCheckIntervalSec: number;
 }
 
 // Popular anycast endpoints (they also answer on :443) — hard for an ISP to single out.
@@ -58,6 +64,11 @@ function readAgentVersion(): string {
   } catch {
     return '0.0.0';
   }
+}
+
+function parseUpdateMode(raw: string | undefined): UpdateMode {
+  const v = (raw ?? 'notify').trim().toLowerCase();
+  return v === 'off' || v === 'auto' ? v : 'notify';
 }
 
 export function loadConfig(): AgentConfig {
@@ -103,6 +114,8 @@ export function loadConfig(): AgentConfig {
     dnsPublicServer: env.DNS_PUBLIC_SERVER ?? '1.1.1.1',
     dohUrl: env.DOH_URL ?? 'https://cloudflare-dns.com/dns-query',
     dnsCheckIntervalSec: Number(env.DNS_CHECK_INTERVAL_SEC ?? 600),
+    updateMode: parseUpdateMode(env.UPDATE_MODE),
+    updateCheckIntervalSec: Number(env.UPDATE_CHECK_INTERVAL_SEC ?? 86400),
   };
 }
 

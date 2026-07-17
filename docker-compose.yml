@@ -2,8 +2,8 @@
 # 1) set CLAIM_CODE (from the panel's "Add agent" dialog); INGEST_URL defaults to the ispection service,
 # 2) docker compose up -d --build
 #
-# Updates: manual `docker compose pull && docker compose up -d`, or opt-in Watchtower for auto-update.
-# The agent also polls /agents/release and logs when a newer version is available.
+# Updates (UPDATE_MODE, default notify): manual `docker compose pull && docker compose up -d`,
+# or opt-in auto with `docker compose --profile autoupdate up -d` (runs Watchtower for just this agent).
 
 services:
   agent:
@@ -18,8 +18,21 @@ services:
       AGENT_DATA_DIR: /data
       INGEST_INSECURE: ${INGEST_INSECURE:-false}
       INGEST_PIN_SPKI: ${INGEST_PIN_SPKI:-} # base64 SHA-256 of the server SPKI (prod https)
+      UPDATE_MODE: ${UPDATE_MODE:-notify} # off | notify | auto (auto = let Watchtower own the image swap)
+    labels:
+      com.centurylinklabs.watchtower.enable: 'true' # picked up only by a --label-enable Watchtower
     volumes:
       - ispection_agent:/data # Ed25519 key, buffer, meta — must survive restarts
+
+  # Opt-in auto-update: `docker compose --profile autoupdate up -d`.
+  # --label-enable → watches ONLY the labeled agent (not your other containers); hourly, prunes old images.
+  watchtower:
+    image: containrrr/watchtower
+    restart: unless-stopped
+    profiles: [autoupdate]
+    command: --label-enable --cleanup --interval 3600
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   ispection_agent:

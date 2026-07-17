@@ -1,4 +1,5 @@
 import { createPublicKey, verify } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { loadConfig, AgentConfig, RemoteConfig } from './config';
 import { AgentKeys } from './crypto/keys';
 import { AgentStore } from './store/buffer';
@@ -58,9 +59,20 @@ function scheduleLoop(fn: () => void, baseMs: number, pct: number): void {
 
 interface ReleaseManifest {
   version?: string;
+  image?: string;
+  dockerRun?: string;
   url?: string;
   sha256?: string;
   sig?: string;
+}
+
+// In a container the agent can't (and shouldn't) swap itself — Watchtower or a manual pull does it.
+function inContainer(): boolean {
+  try {
+    return existsSync('/.dockerenv');
+  } catch {
+    return false;
+  }
 }
 
 /** Verifies a signed manifest: Ed25519 over `${version}.${url}.${sha256}` with the release key. */
@@ -83,20 +95,34 @@ async function checkRelease(cfg: AgentConfig): Promise<void> {
     const m = parsed.data ?? parsed;
     if (!m.version || m.version === cfg.version) return;
 
+    // Exact upgrade command straight from the release manifest, so the log line is actionable.
+    const how = m.dockerRun ? `\n  ${m.dockerRun}` : m.image ? ` (image: ${m.image})` : '';
+
     // Signed manifest (native/SEA) → never trust the URL without a valid signature.
     if (m.url && m.sha256 && m.sig) {
       if (!cfg.releasePublicKey) {
-        log(`Update ${m.version} available, but RELEASE_PUBLIC_KEY is not set — skipping self-update (Docker: update the image).`);
+        log(`Update ${m.version} available, but RELEASE_PUBLIC_KEY is not set — skipping self-update.${how}`);
         return;
       }
       if (!verifyManifest(m, cfg.releasePublicKey)) {
         err(`Release manifest ${m.version} has an INVALID signature — ignoring.`);
         return;
       }
-      log(`Verified update ${m.version} (signature OK): ${m.url} sha256=${m.sha256.slice(0, 12)}… — download, verify sha256, swap (see README).`);
+      // Verified artifact. In-process binary swap (bare-metal SEA) is phase 2 — never swap inside a container.
+      const tail =
+        cfg.updateMode === 'auto' && inContainer()
+          ? 'in Docker the image is updated by Watchtower.'
+          : 'download, verify sha256, swap (see README).';
+      log(`Verified update ${m.version} (signature OK): ${m.url} sha256=${m.sha256.slice(0, 12)}… — ${tail}`);
       return;
     }
-    log(`Agent update available: ${m.version} (you have ${cfg.version}). Update the image and restart the container.`);
+
+    // Docker path (no signed binary artifact): notify with the exact command to run.
+    if (cfg.updateMode === 'auto' && inContainer()) {
+      log(`Update ${m.version} available (you have ${cfg.version}). Auto mode: the image swap is handled by Watchtower if it's running.${how}`);
+    } else {
+      log(`Agent update available: ${m.version} (you have ${cfg.version}). Update the image and restart the container.${how}`);
+    }
   } catch {
     /* offline or no endpoint — skip */
   }
@@ -329,15 +355,17 @@ async function main(): Promise<void> {
     ? `rotating ${cfg.targetsPerCycle}/${cfg.targetPool.length} from pool`
     : `[${cfg.targets.join(', ')}]`;
   const jitterDesc = cfg.scheduleJitterPct > 0 ? `; jitter ±${Math.round(cfg.scheduleJitterPct * 100)}%` : '';
-  log(`ispection agent v${cfg.version} → ${cfg.ingestUrl}; targets=${targetsDesc}; interval=${cfg.intervalSec}s${jitterDesc}`);
+  log(`ispection agent v${cfg.version} → ${cfg.ingestUrl}; targets=${targetsDesc}; interval=${cfg.intervalSec}s${jitterDesc}; updates=${cfg.updateMode}`);
   await enrollIfNeeded(cfg, keys, store);
 
   // Remote config: fetch before building the loop (at startup), then refresh (some fields take effect next cycle).
   await fetchRemoteConfig(cfg, keys, store);
   scheduleLoop(() => void fetchRemoteConfig(cfg, keys, store), 15 * 60 * 1000, 0);
 
-  void checkRelease(cfg);
-  setInterval(() => void checkRelease(cfg), 24 * 60 * 60 * 1000);
+  if (cfg.updateMode !== 'off') {
+    void checkRelease(cfg);
+    setInterval(() => void checkRelease(cfg), cfg.updateCheckIntervalSec * 1000);
+  }
 
   const agentLive = new AgentLive(cfg, keys, store.agentId ?? 0);
   if (store.agentId) agentLive.connect();

@@ -13,6 +13,9 @@ FROM node:24-alpine AS runtime
 WORKDIR /app
 RUN apk add --no-cache iputils
 ENV NODE_ENV=production
+# Link the image to its repo on GHCR + opt in to label-scoped Watchtower auto-update (harmless if unused).
+LABEL org.opencontainers.image.source="https://github.com/robimy-online/ispection-agent" \
+      com.centurylinklabs.watchtower.enable="true"
 COPY package.json ./
 COPY --from=build /app/dist ./dist
 CMD ["node", "dist/index.js"]
