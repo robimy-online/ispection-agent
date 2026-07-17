@@ -1,9 +1,26 @@
 # ispection agent
 
+[![CI](https://github.com/robimy-online/ispection-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/robimy-online/ispection-agent/actions/workflows/ci.yml)
+[![Release](https://github.com/robimy-online/ispection-agent/actions/workflows/release.yml/badge.svg)](https://github.com/robimy-online/ispection-agent/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen.svg)](package.json)
+[![Container: GHCR](https://img.shields.io/badge/container-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/robimy-online/ispection-agent/pkgs/container/ispection-agent)
+[![Signed with cosign](https://img.shields.io/badge/signed-cosign-30363D?logo=sigstore&logoColor=white)](https://www.sigstore.dev/)
+
 Lightweight ISP-reliability monitoring agent. It runs on your own hardware (NAS, mini-PC,
 terminal, VPS), periodically measures the quality of your internet link, and ships
 **Ed25519-signed** measurements to an [ispection](https://ispection.robimy.online) collector.
 A durable local buffer makes it resilient to short outages.
+
+## Hosted service
+
+Using the hosted ispection instance (the default `INGEST_URL`)? Ask for a claim code, then watch your
+link's status:
+
+- **Status page:** https://ispection.robimy.online
+- **Admin panel:** https://ispection.robimy.online/admin
+
+Prefer to self-host the backend? Point `INGEST_URL` at your own collector.
 
 ## What it measures
 
