@@ -269,6 +269,9 @@ function applyRemoteConfig(cfg: AgentConfig, rc: RemoteConfig): boolean {
   if (Array.isArray(rc.targets) && rc.targets.length) (cfg.targets = rc.targets), (changed = true);
   if (typeof rc.rotateTargets === 'boolean') (cfg.rotateTargets = rc.rotateTargets), (changed = true);
   if (typeof rc.scheduleJitterPct === 'number') (cfg.scheduleJitterPct = rc.scheduleJitterPct), (changed = true);
+  // Declared link speeds from the panel take precedence over env DECLARED_* (used for "% of contract").
+  if (typeof rc.declaredDownMbps === 'number' && rc.declaredDownMbps > 0) (cfg.declaredDownMbps = rc.declaredDownMbps), (changed = true);
+  if (typeof rc.declaredUpMbps === 'number' && rc.declaredUpMbps > 0) (cfg.declaredUpMbps = rc.declaredUpMbps), (changed = true);
   return changed;
 }
 

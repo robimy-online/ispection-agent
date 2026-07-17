@@ -9,6 +9,8 @@ export interface RemoteConfig {
   targets?: string[];
   rotateTargets?: boolean;
   scheduleJitterPct?: number;
+  declaredDownMbps?: number; // declared (contracted) download speed from the panel → "% of contract"
+  declaredUpMbps?: number; // declared upload speed from the panel
 }
 
 export type UpdateMode = 'off' | 'notify' | 'auto';
