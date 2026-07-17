@@ -28,6 +28,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # docker-container driver → supports SBOM + provenance attestations (the default `docker` driver does not).
+      - uses: docker/setup-buildx-action@v3
+
       - id: meta
         uses: docker/metadata-action@v5
         with:
@@ -36,7 +39,6 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest
 
       - uses: sigstore/cosign-installer@v3
 
