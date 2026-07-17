@@ -75,6 +75,18 @@ function parseUpdateMode(raw: string | undefined): UpdateMode {
   return v === 'off' || v === 'auto' ? v : 'notify';
 }
 
+/**
+ * Parse a numeric env var with a default and hard bounds. A missing/blank/non-numeric value
+ * falls back to the default; out-of-range values are clamped. This keeps a typo like
+ * `INGEST_INTERVAL_SEC=0` (or a stray `NaN`) from turning a scheduler loop into a busy-loop
+ * that hammers the collector.
+ */
+function envNum(raw: string | undefined, def: number, min: number, max: number): number {
+  const n = Number(raw);
+  if (raw === undefined || raw.trim() === '' || !Number.isFinite(n)) return def;
+  return Math.min(max, Math.max(min, n));
+}
+
 export function loadConfig(): AgentConfig {
   const env = process.env;
   // Drop malformed/flag-like targets up front — they flow to ping/traceroute (see validate.ts).
@@ -88,43 +100,43 @@ export function loadConfig(): AgentConfig {
     ingestUrl: (env.INGEST_URL ?? 'https://ispection.robimy.online/api').replace(/\/+$/, ''),
     claimCode: env.CLAIM_CODE ?? null,
     targets: safeTargets,
-    intervalSec: Number(env.INGEST_INTERVAL_SEC ?? 30),
-    pingCount: Math.max(1, Math.trunc(Number(env.PING_COUNT ?? 5)) || 5),
+    intervalSec: envNum(env.INGEST_INTERVAL_SEC, 30, 5, 86_400),
+    pingCount: envNum(env.PING_COUNT, 5, 1, 20),
     dataDir: env.AGENT_DATA_DIR ?? path.join(os.homedir(), '.ispection-agent'),
     insecure: env.INGEST_INSECURE === 'true',
     pinSpki: env.INGEST_PIN_SPKI ?? null,
-    maxBatch: Number(env.INGEST_MAX_BATCH ?? 500),
-    maxBuffer: Math.max(100, Math.trunc(Number(env.BUFFER_MAX ?? 50_000)) || 50_000),
+    maxBatch: envNum(env.INGEST_MAX_BATCH, 500, 1, 10_000),
+    maxBuffer: envNum(env.BUFFER_MAX, 50_000, 100, 5_000_000),
     version: readAgentVersion(),
     httpTarget: env.HTTP_TARGET ?? 'https://www.google.com/generate_204',
     releasePublicKey: env.RELEASE_PUBLIC_KEY ?? '',
     tracerouteTarget: env.TRACEROUTE_TARGET ?? safeTargets[0] ?? '1.1.1.1',
-    tracerouteIntervalSec: Number(env.TRACEROUTE_INTERVAL_SEC ?? 300),
+    tracerouteIntervalSec: envNum(env.TRACEROUTE_INTERVAL_SEC, 300, 30, 86_400),
     throughputUrl: env.THROUGHPUT_URL ?? 'https://speed.cloudflare.com/__down?bytes=25000000',
-    throughputIntervalSec: Number(env.THROUGHPUT_INTERVAL_SEC ?? 900),
-    declaredDownMbps: env.DECLARED_DOWN_MBPS ? Number(env.DECLARED_DOWN_MBPS) : null,
+    throughputIntervalSec: envNum(env.THROUGHPUT_INTERVAL_SEC, 900, 60, 86_400),
+    declaredDownMbps: env.DECLARED_DOWN_MBPS ? envNum(env.DECLARED_DOWN_MBPS, 0, 0, 1_000_000) || null : null,
     uploadUrl: env.UPLOAD_URL ?? 'https://speed.cloudflare.com/__up',
-    uploadBytes: Number(env.UPLOAD_BYTES ?? 8_000_000),
-    declaredUpMbps: env.DECLARED_UP_MBPS ? Number(env.DECLARED_UP_MBPS) : null,
+    uploadBytes: envNum(env.UPLOAD_BYTES, 8_000_000, 0, 100_000_000),
+    declaredUpMbps: env.DECLARED_UP_MBPS ? envNum(env.DECLARED_UP_MBPS, 0, 0, 1_000_000) || null : null,
     ipv6Target: env.IPV6_TARGET ?? '2606:4700:4700::1111',
     ipv4Baseline: env.IPV4_BASELINE ?? '1.1.1.1',
-    ipv6IntervalSec: Number(env.IPV6_INTERVAL_SEC ?? 300),
+    ipv6IntervalSec: envNum(env.IPV6_INTERVAL_SEC, 300, 30, 86_400),
     targetPool: (env.TARGET_POOL ?? DEFAULT_TARGET_POOL)
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean)
       .filter(isValidHost),
     rotateTargets: env.ROTATE_TARGETS === 'true',
-    targetsPerCycle: Math.max(1, Number(env.TARGETS_PER_CYCLE ?? safeTargets.length)),
-    scheduleJitterPct: Math.min(0.5, Math.max(0, Number(env.SCHEDULE_JITTER_PCT ?? 0))),
+    targetsPerCycle: envNum(env.TARGETS_PER_CYCLE, safeTargets.length, 1, 64),
+    scheduleJitterPct: envNum(env.SCHEDULE_JITTER_PCT, 0, 0, 0.5),
     portProbes: parsePortProbes(env.PORT_PROBES ?? DEFAULT_PORT_PROBES),
-    portProbeIntervalSec: Number(env.PORT_PROBE_INTERVAL_SEC ?? 600),
+    portProbeIntervalSec: envNum(env.PORT_PROBE_INTERVAL_SEC, 600, 30, 86_400),
     dnsTestDomain: env.DNS_TEST_DOMAIN ?? 'example.com',
     dnsPublicServer: env.DNS_PUBLIC_SERVER ?? '1.1.1.1',
     dohUrl: env.DOH_URL ?? 'https://cloudflare-dns.com/dns-query',
-    dnsCheckIntervalSec: Number(env.DNS_CHECK_INTERVAL_SEC ?? 600),
+    dnsCheckIntervalSec: envNum(env.DNS_CHECK_INTERVAL_SEC, 600, 30, 86_400),
     updateMode: parseUpdateMode(env.UPDATE_MODE),
-    updateCheckIntervalSec: Number(env.UPDATE_CHECK_INTERVAL_SEC ?? 86400),
+    updateCheckIntervalSec: envNum(env.UPDATE_CHECK_INTERVAL_SEC, 86_400, 3_600, 604_800),
   };
 }
 

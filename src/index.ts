@@ -16,7 +16,7 @@ import { measurePorts } from './measure/ports';
 import { measureDns } from './measure/dns-check';
 import { ping } from './measure/ping';
 import { clamp, isValidHost } from './validate';
-import { err, log, warn } from './logger';
+import { clean, err, log, warn } from './logger';
 
 interface LiveState {
   last: LiveStatus;
@@ -24,6 +24,11 @@ interface LiveState {
 
 const startedAtMs = Date.now();
 let lastError: string | null = null;
+
+// Cap batches drained per flush so a post-outage backlog clears over a few cycles instead of one
+// back-to-back burst — that burst, multiplied across a whole fleet reconnecting at once, is a
+// thundering herd on the collector. The remainder drains on subsequent cycles.
+const MAX_DRAIN_BATCHES = 20;
 
 function pinOpts(cfg: AgentConfig): { pinSpki: string | null } {
   return { pinSpki: cfg.insecure ? null : cfg.pinSpki };
@@ -96,17 +101,19 @@ async function checkRelease(cfg: AgentConfig): Promise<void> {
     const m = parsed.data ?? parsed;
     if (!m.version || m.version === cfg.version) return;
 
+    // All manifest fields are server-controlled → sanitize before they hit the logs (clean()).
+    const ver = clean(m.version, 40);
     // Exact upgrade command straight from the release manifest, so the log line is actionable.
-    const how = m.dockerRun ? `\n  ${m.dockerRun}` : m.image ? ` (image: ${m.image})` : '';
+    const how = m.dockerRun ? `\n  ${clean(m.dockerRun)}` : m.image ? ` (image: ${clean(m.image)})` : '';
 
     // Signed manifest (native/SEA) → never trust the URL without a valid signature.
     if (m.url && m.sha256 && m.sig) {
       if (!cfg.releasePublicKey) {
-        log(`Update ${m.version} available, but RELEASE_PUBLIC_KEY is not set — skipping self-update.${how}`);
+        log(`Update ${ver} available, but RELEASE_PUBLIC_KEY is not set — skipping self-update.${how}`);
         return;
       }
       if (!verifyManifest(m, cfg.releasePublicKey)) {
-        err(`Release manifest ${m.version} has an INVALID signature — ignoring.`);
+        err(`Release manifest ${ver} has an INVALID signature — ignoring.`);
         return;
       }
       // Verified artifact. In-process binary swap (bare-metal SEA) is phase 2 — never swap inside a container.
@@ -114,15 +121,15 @@ async function checkRelease(cfg: AgentConfig): Promise<void> {
         cfg.updateMode === 'auto' && inContainer()
           ? 'in Docker the image is updated by Watchtower.'
           : 'download, verify sha256, swap (see README).';
-      log(`Verified update ${m.version} (signature OK): ${m.url} sha256=${m.sha256.slice(0, 12)}… — ${tail}`);
+      log(`Verified update ${ver} (signature OK): ${clean(m.url, 120)} sha256=${clean(m.sha256, 12)}… — ${tail}`);
       return;
     }
 
     // Docker path (no signed binary artifact): notify with the exact command to run.
     if (cfg.updateMode === 'auto' && inContainer()) {
-      log(`Update ${m.version} available (you have ${cfg.version}). Auto mode: the image swap is handled by Watchtower if it's running.${how}`);
+      log(`Update ${ver} available (you have ${cfg.version}). Auto mode: the image swap is handled by Watchtower if it's running.${how}`);
     } else {
-      log(`Agent update available: ${m.version} (you have ${cfg.version}). Update the image and restart the container.${how}`);
+      log(`Agent update available: ${ver} (you have ${cfg.version}). Update the image and restart the container.${how}`);
     }
   } catch {
     /* offline or no endpoint — skip */
@@ -136,23 +143,27 @@ async function enrollIfNeeded(cfg: AgentConfig, keys: AgentKeys, store: AgentSto
     JSON.stringify({ claimCode: cfg.claimCode, publicKey: keys.publicKeyBase64(), version: cfg.version }),
   );
   const res = await postJson(`${cfg.ingestUrl}/agents/enroll`, { 'x-api-version': String(INGEST_API_VERSION) }, body, pinOpts(cfg));
-  if (res.status >= 300) throw new Error(`Enrollment failed: ${res.status} ${res.body}`);
+  if (res.status >= 300) throw new Error(`Enrollment failed: ${res.status} ${clean(res.body)}`);
   let parsed: { data?: { agentId?: number }; agentId?: number };
   try {
     parsed = JSON.parse(res.body) as { data?: { agentId?: number }; agentId?: number };
   } catch {
-    throw new Error(`Enrollment response was not valid JSON: ${res.body.slice(0, 200)}`);
+    throw new Error(`Enrollment response was not valid JSON: ${clean(res.body, 200)}`);
   }
   const agentId = parsed.data?.agentId ?? parsed.agentId;
-  if (!agentId) throw new Error(`Enrollment response has no agentId: ${res.body}`);
+  if (!agentId) throw new Error(`Enrollment response has no agentId: ${clean(res.body)}`);
   store.setAgentId(agentId);
   log(`Enrolled as agent #${agentId}`);
+  log('CLAIM_CODE has now been consumed — it is only needed for first-run enrollment and can be removed from the environment.');
 }
 
 async function flush(cfg: AgentConfig, keys: AgentKeys, store: AgentStore): Promise<void> {
-  // Drain the whole backlog, one batch per request, until empty or a send fails. Draining only
-  // one batch per cycle (as before) let a post-outage backlog take many minutes to clear.
-  while (store.pending() > 0) {
+  // Drain the backlog one batch per request, up to MAX_DRAIN_BATCHES per cycle, until empty or a
+  // send fails. Draining only one batch per cycle (as before) let a post-outage backlog take many
+  // minutes to clear; draining it all at once is a thundering herd — this is the middle ground.
+  let sent = 0;
+  while (store.pending() > 0 && sent < MAX_DRAIN_BATCHES) {
+    sent += 1;
     const batch = store.peekBatch(cfg.maxBatch);
     const rawBody = Buffer.from(JSON.stringify({ samples: batch }));
     const ts = String(Date.now());
@@ -173,7 +184,7 @@ async function flush(cfg: AgentConfig, keys: AgentKeys, store: AgentStore): Prom
       log(`Sent ${batch.length} samples (seq=${seq}); buffered: ${store.pending()}`);
     } else {
       lastError = `ingest ${res.status}`;
-      err(`Ingest failed: ${res.status} ${res.body} — keeping ${batch.length} buffered`);
+      err(`Ingest failed: ${res.status} ${clean(res.body)} — keeping ${batch.length} buffered`);
       return; // stop draining; retry on the next cycle
     }
   }
@@ -187,7 +198,7 @@ async function sendDns(cfg: AgentConfig, keys: AgentKeys, store: AgentStore): Pr
     const flags = [d.nxdomainHijack ? 'NXDOMAIN-hijack' : '', d.dohBlocked ? 'DoH-blocked' : ''].filter(Boolean).join(', ');
     log(`DNS: isp ${d.ispResolveMs ?? '—'}ms / pub ${d.publicResolveMs ?? '—'}ms${flags ? ` [${flags}]` : ''}`);
   } else {
-    err(`DNS send failed: ${res.status} ${res.body}`);
+    err(`DNS send failed: ${res.status} ${clean(res.body)}`);
   }
 }
 
@@ -229,7 +240,7 @@ async function sendTraceroute(cfg: AgentConfig, keys: AgentKeys, store: AgentSto
   if (hops.length === 0) return;
   const res = await signedPost(cfg, keys, store, '/ingest/traceroute', { target: cfg.tracerouteTarget, hops });
   if (res.status >= 200 && res.status < 300) log(`Traceroute ${cfg.tracerouteTarget}: ${hops.length} hops`);
-  else err(`Traceroute send failed: ${res.status} ${res.body}`);
+  else err(`Traceroute send failed: ${res.status} ${clean(res.body)}`);
 }
 
 async function sendThroughput(cfg: AgentConfig, keys: AgentKeys, store: AgentStore): Promise<void> {
@@ -268,7 +279,7 @@ async function sendThroughput(cfg: AgentConfig, keys: AgentKeys, store: AgentSto
         `${bufferbloatMs !== null ? `, bufferbloat +${bufferbloatMs}ms` : ''}`,
     );
   } else {
-    err(`Throughput send failed: ${res.status} ${res.body}`);
+    err(`Throughput send failed: ${res.status} ${clean(res.body)}`);
   }
 }
 
@@ -339,7 +350,7 @@ async function sendIpv6(cfg: AgentConfig, keys: AgentKeys, store: AgentStore): P
   if (res.status >= 200 && res.status < 300) {
     log(`IPv6 ${cfg.ipv6Target}: ${m.reachable ? `${m.ipv6RttMs?.toFixed(1)}ms` : 'UNREACHABLE'} (v4 ${m.ipv4RttMs?.toFixed(1) ?? '—'}ms)`);
   } else {
-    err(`IPv6 send failed: ${res.status} ${res.body}`);
+    err(`IPv6 send failed: ${res.status} ${clean(res.body)}`);
   }
 }
 
@@ -351,7 +362,7 @@ async function sendPorts(cfg: AgentConfig, keys: AgentKeys, store: AgentStore): 
     const blocked = probes.filter((p) => !p.reachable).length;
     log(`Ports: ${probes.length - blocked}/${probes.length} reachable`);
   } else {
-    err(`Ports send failed: ${res.status} ${res.body}`);
+    err(`Ports send failed: ${res.status} ${clean(res.body)}`);
   }
 }
 

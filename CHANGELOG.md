@@ -23,6 +23,13 @@ All notable changes are documented here. The format loosely follows
   see the upgrade note in the README.
 - Startup warns loudly when `INGEST_INSECURE=true` (pinning off + plain HTTP), and when a hosted
   `https` collector is used without `INGEST_PIN_SPKI` set.
+- All numeric env vars are validated and range-clamped (`INGEST_INTERVAL_SEC`, `PING_COUNT`,
+  intervals, `INGEST_MAX_BATCH`, `BUFFER_MAX`, `UPLOAD_BYTES`, …). A typo like `INGEST_INTERVAL_SEC=0`
+  or a `NaN` can no longer turn a scheduler into a busy-loop that hammers the collector.
+- Server-controlled strings (release manifest fields, error-response bodies) are sanitized
+  (control chars stripped, truncated) before they are logged — no log/ANSI injection from a
+  tampered collector response.
+- State files (`meta.json`, `buffer.json`) are written `0600`, matching the private key.
 
 ### Reliability
 - **Bounded buffer.** New `BUFFER_MAX` (default 50000) caps buffered samples; the oldest are dropped
@@ -33,6 +40,8 @@ All notable changes are documented here. The format loosely follows
   privilege, and the bare `docker run` path now persists to `/data` by default (`AGENT_DATA_DIR`).
 - Enrollment fails with a clear error instead of an unhandled `SyntaxError` when the collector
   returns a non-JSON 2xx body.
+- Backlog drain is capped per cycle (and the live-channel reconnect is jittered) so a whole fleet
+  recovering from a collector outage doesn't stampede it in lockstep.
 
 ## [0.1.1] — 2026-07-17
 

@@ -143,10 +143,12 @@ export class AgentLive {
       this.socket = undefined;
     }
     if (this.reconnectTimer) return; // a reconnect is already pending — don't stack them
+    // Jitter (±50%) so a whole fleet dropped by a collector restart doesn't reconnect in lockstep.
+    const delay = Math.round(this.reconnectDelay * (0.5 + Math.random()));
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
       this.connect();
-    }, this.reconnectDelay);
+    }, delay);
     this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30_000);
   }
 }

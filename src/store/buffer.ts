@@ -92,7 +92,8 @@ export class AgentStore {
 
   private atomicWrite(p: string, data: string): void {
     const tmp = `${p}.tmp`;
-    writeFileSync(tmp, data);
+    // 0600: buffer/meta hold agentId, sequence and measurements — owner-only, like the key.
+    writeFileSync(tmp, data, { mode: 0o600 });
     renameSync(tmp, p);
   }
 }
