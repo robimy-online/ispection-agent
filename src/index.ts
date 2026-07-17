@@ -35,7 +35,7 @@ function pinOpts(cfg: AgentConfig): { pinSpki: string | null } {
 }
 
 /** Anti-fingerprinting: when rotation is enabled, each cycle takes a sliding window from the target pool. */
-function makeTargetPicker(cfg: AgentConfig): () => string[] {
+export function makeTargetPicker(cfg: AgentConfig): () => string[] {
   if (!cfg.rotateTargets || cfg.targetPool.length === 0) return () => cfg.targets;
   const pool = cfg.targetPool;
   const n = Math.min(cfg.targetsPerCycle, pool.length);
@@ -49,7 +49,7 @@ function makeTargetPicker(cfg: AgentConfig): () => string[] {
 }
 
 /** Randomly jitters the interval (±pct) so probes don't land on round seconds. */
-function jitteredMs(baseMs: number, pct: number): number {
+export function jitteredMs(baseMs: number, pct: number): number {
   if (pct <= 0) return baseMs;
   return Math.max(1000, Math.round(baseMs + baseMs * pct * (Math.random() * 2 - 1)));
 }
@@ -82,7 +82,7 @@ function inContainer(): boolean {
 }
 
 /** Verifies a signed manifest: Ed25519 over `${version}.${url}.${sha256}` with the release key. */
-function verifyManifest(m: ReleaseManifest, pubKeyBase64: string): boolean {
+export function verifyManifest(m: ReleaseManifest, pubKeyBase64: string): boolean {
   if (!m.version || !m.url || !m.sha256 || !m.sig) return false;
   try {
     const key = createPublicKey({ key: Buffer.from(pubKeyBase64, 'base64'), format: 'der', type: 'spki' });
@@ -289,7 +289,7 @@ async function sendThroughput(cfg: AgentConfig, keys: AgentKeys, store: AgentSto
  * before it takes effect, so a compromised or misbehaving server can't drive the agent into
  * abusive intervals or hand flag-like strings to the probe binaries.
  */
-function applyRemoteConfig(cfg: AgentConfig, rc: RemoteConfig): boolean {
+export function applyRemoteConfig(cfg: AgentConfig, rc: RemoteConfig): boolean {
   let changed = false;
   if (typeof rc.intervalSec === 'number' && rc.intervalSec > 0) {
     const v = Math.round(clamp(rc.intervalSec, 5, 86_400));
@@ -476,7 +476,10 @@ async function main(): Promise<void> {
   scheduleLoop(() => void sendHeartbeat(cfg, keys, store).catch(() => undefined), 60 * 1000, 0);
 }
 
-main().catch((e: unknown) => {
-  err(`fatal: ${(e as Error)?.message ?? String(e)}`);
-  process.exit(1);
-});
+// Only run the agent when executed directly (`node dist/index.js`); stay import-safe for unit tests.
+if (require.main === module) {
+  main().catch((e: unknown) => {
+    err(`fatal: ${(e as Error)?.message ?? String(e)}`);
+    process.exit(1);
+  });
+}

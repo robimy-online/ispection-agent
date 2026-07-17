@@ -31,6 +31,13 @@ All notable changes are documented here. The format loosely follows
   tampered collector response.
 - State files (`meta.json`, `buffer.json`) are written `0600`, matching the private key.
 
+### Tests
+- Added a unit test suite (`npm test`, `node:test` + `ts-node`, no new runtime deps):
+  70 tests over host validation, env/config clamping, the durable buffer (cap, persistence, `0600`),
+  the ping/traceroute output parsers, WebSocket client framing (RFC 6455 masking + length paths),
+  SPKI pin checking, and remote-config clamping/validation. `index.ts` is now import-safe
+  (`require.main === module` guard) so its logic can be tested without starting the agent.
+
 ### Reliability
 - **Bounded buffer.** New `BUFFER_MAX` (default 50000) caps buffered samples; the oldest are dropped
   past the cap, bounding RAM/disk during a long outage.

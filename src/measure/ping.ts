@@ -44,7 +44,7 @@ export async function ping(target: string, count: number): Promise<PingResult | 
   }
 }
 
-function parse(out: string, count: number): PingResult {
+export function parse(out: string, count: number): PingResult {
   // loss: linux/mac "0% packet loss"; windows "(0% loss)"
   const lossM = out.match(/([\d.]+)%\s*packet loss/i) ?? out.match(/\(([\d.]+)%\s*loss\)/i);
   // rtt: linux "= min/avg/max/mdev", mac "= min/avg/max/stddev"

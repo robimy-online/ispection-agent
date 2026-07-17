@@ -28,7 +28,7 @@ export async function traceroute(target: string): Promise<Hop[]> {
   }
 }
 
-function parse(out: string): Hop[] {
+export function parse(out: string): Hop[] {
   const hops: Hop[] = [];
   for (const line of out.split('\n')) {
     const m = line.match(/^\s*(\d+)\s+(.*)$/);

@@ -154,7 +154,7 @@ export class AgentLive {
 }
 
 /** Encodes a single client→server frame (FIN=1, client mask required by RFC 6455). */
-function encodeFrame(opcode: number, payload: Buffer): Buffer {
+export function encodeFrame(opcode: number, payload: Buffer): Buffer {
   const len = payload.length;
   let header: Buffer;
   if (len < 126) {
