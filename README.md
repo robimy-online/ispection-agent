@@ -155,6 +155,12 @@ It copies the agent to `/opt/ispection-agent`, builds it, and installs a system 
   server (cross-agent / per-ISP anomaly detection). This is inherent to any client-side measurement.
 - **Release integrity:** published images are cosign-signed; an optional Ed25519-signed release manifest backs native self-update.
 
+## Contributing
+
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[Code of Conduct](CODE_OF_CONDUCT.md). Please report security issues privately per the
+[security policy](SECURITY.md), not as public issues.
+
 ## License
 
 [MIT](LICENSE) © robimy//online
