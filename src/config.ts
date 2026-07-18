@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
-import { isValidHost } from './validate';
+import { isPublicTarget, isValidHost } from './validate';
 
 // Remote config fetched from the server (overrides env). Local type — the agent stays standalone.
 export interface RemoteConfig {
@@ -89,12 +89,13 @@ function envNum(raw: string | undefined, def: number, min: number, max: number):
 
 export function loadConfig(): AgentConfig {
   const env = process.env;
-  // Drop malformed/flag-like targets up front — they flow to ping/traceroute (see validate.ts).
+  // Drop malformed/flag-like AND private/reserved targets up front — they flow to ping/traceroute.
+  // Public-only keeps this hobby monitor from ever probing someone's LAN (see validate.ts).
   const targets = (env.TARGETS ?? '1.1.1.1,8.8.8.8')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-    .filter(isValidHost);
+    .filter(isPublicTarget);
   const safeTargets = targets.length ? targets : ['1.1.1.1', '8.8.8.8'];
   return {
     ingestUrl: (env.INGEST_URL ?? 'https://ispection.robimy.online/api').replace(/\/+$/, ''),
@@ -110,7 +111,8 @@ export function loadConfig(): AgentConfig {
     version: readAgentVersion(),
     httpTarget: env.HTTP_TARGET ?? 'https://www.google.com/generate_204',
     releasePublicKey: env.RELEASE_PUBLIC_KEY ?? '',
-    tracerouteTarget: env.TRACEROUTE_TARGET ?? safeTargets[0] ?? '1.1.1.1',
+    tracerouteTarget:
+      env.TRACEROUTE_TARGET && isPublicTarget(env.TRACEROUTE_TARGET) ? env.TRACEROUTE_TARGET : (safeTargets[0] ?? '1.1.1.1'),
     tracerouteIntervalSec: envNum(env.TRACEROUTE_INTERVAL_SEC, 300, 30, 86_400),
     throughputUrl: env.THROUGHPUT_URL ?? 'https://speed.cloudflare.com/__down?bytes=25000000',
     throughputIntervalSec: envNum(env.THROUGHPUT_INTERVAL_SEC, 900, 60, 86_400),
@@ -125,7 +127,7 @@ export function loadConfig(): AgentConfig {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean)
-      .filter(isValidHost),
+      .filter(isPublicTarget),
     rotateTargets: env.ROTATE_TARGETS === 'true',
     targetsPerCycle: envNum(env.TARGETS_PER_CYCLE, safeTargets.length, 1, 64),
     scheduleJitterPct: envNum(env.SCHEDULE_JITTER_PCT, 0, 0, 0.5),

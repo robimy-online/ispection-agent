@@ -7,3 +7,4 @@ data/
 # local secrets (your filled-in copy of .env.example) — .env.example itself stays tracked
 .env
 .DS_Store
+.claude

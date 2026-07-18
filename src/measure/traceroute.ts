@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { isValidHost } from '../validate';
+import { isPublicIpv4, isValidHost } from '../validate';
 
 const exec = promisify(execFile);
 
@@ -36,9 +36,12 @@ export function parse(out: string): Hop[] {
     const rest = m[2];
     const ipMatch = rest.match(/(\d{1,3}(?:\.\d{1,3}){3})/);
     const rttMatch = rest.match(/([\d.]+)\s*ms/); // first RTT in the line
+    // Privacy: private/reserved hops (home gateway, CGNAT, LAN) are masked to null before leaving
+    // the machine — we keep the hop and its latency, but never publish the address. See validate.ts.
+    const ip = ipMatch && isPublicIpv4(ipMatch[1]) ? ipMatch[1] : null;
     hops.push({
       hop: Number(m[1]),
-      ip: ipMatch ? ipMatch[1] : null,
+      ip,
       rttMs: rttMatch ? Number(rttMatch[1]) : null,
     });
   }

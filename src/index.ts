@@ -15,7 +15,7 @@ import { measureIpv6 } from './measure/ipv6';
 import { measurePorts } from './measure/ports';
 import { measureDns } from './measure/dns-check';
 import { ping } from './measure/ping';
-import { clamp, isValidHost } from './validate';
+import { clamp, isPublicTarget } from './validate';
 import { clean, err, log, warn } from './logger';
 
 interface LiveState {
@@ -300,7 +300,8 @@ export function applyRemoteConfig(cfg: AgentConfig, rc: RemoteConfig): boolean {
     if (v !== cfg.pingCount) (cfg.pingCount = v), (changed = true);
   }
   if (Array.isArray(rc.targets)) {
-    const valid = rc.targets.filter((t): t is string => typeof t === 'string' && isValidHost(t));
+    // Public-only, even from the server: remote config can never point our probes at a private LAN.
+    const valid = rc.targets.filter((t): t is string => typeof t === 'string' && isPublicTarget(t));
     if (valid.length && valid.join(',') !== cfg.targets.join(',')) (cfg.targets = valid), (changed = true);
   }
   if (typeof rc.rotateTargets === 'boolean' && rc.rotateTargets !== cfg.rotateTargets) {
