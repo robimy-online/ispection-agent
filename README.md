@@ -32,6 +32,14 @@ Prefer to self-host the backend? Point `INGEST_URL` at your own collector.
 - **Neutrality** — per-port reachability (detects port blocking) and DNS integrity (ISP vs. public resolver, NXDOMAIN-hijack detection, DoH reachability).
 - **Anti-identification** (opt-in) — target rotation from an anycast pool + schedule jitter, so an ISP can't single out and favor probe traffic.
 
+## Privacy
+
+The agent masks private/LAN traceroute hops (home gateway, CGNAT, link-local) **before they leave your
+machine**, and only ever probes **public** targets — private/reserved addresses are rejected, even from
+remote config. Your point gets a public status page reachable **only via its direct link**
+(`/agent/<token>`); there is no public list of points, and your IP and location are never published.
+Full details (PL, hosted service): **[PRIVACY.md](PRIVACY.md)**.
+
 ## How it works
 
 1. **First run** generates its own Ed25519 keypair (`agent-key.pem`, mode `0600`, in the data dir) and enrolls
